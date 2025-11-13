@@ -9,6 +9,10 @@ on:
 jobs:
   backend-tests:
     runs-on: ubuntu-latest
+    env:
+      # Ensure the backend test job does not try to connect to an external DB
+      # so repo falls back to in-memory data and avoids 500s when DB is not provided
+      DATABASE_URL: ""
     steps:
       - name: Checkout
         uses: actions/checkout@v4

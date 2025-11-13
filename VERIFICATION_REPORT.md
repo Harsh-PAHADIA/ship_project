@@ -14,7 +14,6 @@ The entire Fuel EU Maritime project is **production-ready**:
 - ✅ **API**: All 7 endpoints tested and working
 - ✅ **Documentation**: 4 comprehensive guides (AGENT_WORKFLOW.md, REFLECTION.md, QUICK_START.md, README.md)
 - ✅ **Data**: 5 seeded routes ready for use
-- ⚠️ **Minor Note**: Tailwind CSS not installed (removed due to npm ETARGET), but all functionality works perfectly
 
 ---
 

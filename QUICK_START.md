@@ -1,14 +1,35 @@
-# Quick Start: Frontend + Backend Connection
+# Quick Start Guide — FuelEU Maritime Platform
 
-## System Overview
-
-- **Backend API**: Node.js + Express running on `http://localhost:4000`
-- **Frontend App**: React + Vite running on `http://localhost:5174` (or 5173 if available)
-- **Connection**: Vite dev server proxies `/api` requests to backend
+**Author:** Harshita Pahadia  
+**Version:** 1.0  
+**Last Updated:** November 13, 2025
 
 ---
 
-## Starting the System (Two Terminals)
+## 📋 System Overview
+
+The FuelEU Maritime platform consists of two complementary services that work together:
+
+| Component | Technology Stack | Port | Purpose |
+|-----------|------------------|------|---------|
+| **Backend API** | Node.js + Express + TypeScript | `4000` | RESTful API for compliance operations |
+| **Frontend Dashboard** | React + Vite + TailwindCSS | `5174` | Interactive web dashboard |
+| **Proxy** | Vite Dev Server | — | Automatically routes `/api/*` to backend |
+
+**Network Flow:**
+```
+Browser (localhost:5174)
+    ↓
+Vite Dev Server (proxy rule)
+    ↓
+Express Backend (localhost:4000/api)
+    ↓
+In-Memory Database (seeded routes)
+```
+
+---
+
+## 🚀 Starting the System (Two Terminals Required)
 
 ### Terminal 1: Start Backend
 

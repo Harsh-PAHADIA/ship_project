@@ -30,8 +30,13 @@ export const repo: Repository = {
     if (!usePostgres) {
       return inMemoryRoutes;
     }
-    const res = await pool!.query('SELECT * FROM routes ORDER BY route_id');
-    return res.rows;
+    try {
+      const res = await pool!.query('SELECT * FROM routes ORDER BY route_id');
+      return res.rows;
+    } catch (err: any) {
+      console.error('DB getAllRoutes error, falling back to in-memory routes:', err && err.message ? err.message : err);
+      return inMemoryRoutes;
+    }
   },
 
   async setBaseline(routeId: string): Promise<void> {
@@ -61,16 +66,27 @@ export const repo: Repository = {
       const baseline = inMemoryRoutes.find(r => r.is_baseline);
       return baseline ?? null;
     }
-    const res = await pool!.query('SELECT * FROM routes WHERE is_baseline = true LIMIT 1');
-    return res.rows[0] ?? null;
+    try {
+      const res = await pool!.query('SELECT * FROM routes WHERE is_baseline = true LIMIT 1');
+      return res.rows[0] ?? null;
+    } catch (err: any) {
+      console.error('DB getBaseline error, falling back to in-memory baseline:', err && err.message ? err.message : err);
+      const baseline = inMemoryRoutes.find(r => r.is_baseline);
+      return baseline ?? null;
+    }
   },
 
   async getOtherRoutes(): Promise<RouteRow[]> {
     if (!usePostgres) {
       return inMemoryRoutes.filter(r => !r.is_baseline);
     }
-    const res = await pool!.query('SELECT * FROM routes WHERE is_baseline = false ORDER BY route_id');
-    return res.rows;
+    try {
+      const res = await pool!.query('SELECT * FROM routes WHERE is_baseline = false ORDER BY route_id');
+      return res.rows;
+    } catch (err: any) {
+      console.error('DB getOtherRoutes error, falling back to in-memory other routes:', err && err.message ? err.message : err);
+      return inMemoryRoutes.filter(r => !r.is_baseline);
+    }
   },
 
   async upsertCBRecord(record: CBRecord): Promise<void> {
@@ -83,12 +99,22 @@ export const repo: Repository = {
       }
       return;
     }
-    await pool!.query(
-      `INSERT INTO ship_compliance (ship_id, year, cb_tonnes, created_at)
-       VALUES ($1,$2,$3, now())
-       ON CONFLICT (ship_id, year) DO UPDATE SET cb_tonnes=EXCLUDED.cb_tonnes, created_at=now()`,
-      [record.ship_id, record.year, record.cb_tonnes]
-    );
+    try {
+      await pool!.query(
+        `INSERT INTO ship_compliance (ship_id, year, cb_tonnes, created_at)
+         VALUES ($1,$2,$3, now())
+         ON CONFLICT (ship_id, year) DO UPDATE SET cb_tonnes=EXCLUDED.cb_tonnes, created_at=now()`,
+        [record.ship_id, record.year, record.cb_tonnes]
+      );
+    } catch (err: any) {
+      console.error('DB upsertCBRecord error, recording in-memory instead:', err && err.message ? err.message : err);
+      const idx = inMemoryCB.findIndex(r => r.ship_id === record.ship_id && r.year === record.year);
+      if (idx >= 0) {
+        inMemoryCB[idx] = record;
+      } else {
+        inMemoryCB.push(record);
+      }
+    }
   },
 
   async getCBRecord(shipId: string, year: number): Promise<CBRecord | null> {
@@ -96,9 +122,15 @@ export const repo: Repository = {
       const record = inMemoryCB.find(r => r.ship_id === shipId && r.year === year);
       return record ?? null;
     }
-    const res = await pool!.query('SELECT ship_id, year, cb_tonnes FROM ship_compliance WHERE ship_id=$1 AND year=$2', [shipId, year]);
-    if (res.rowCount === 0) return null;
-    return { ship_id: res.rows[0].ship_id, year: res.rows[0].year, cb_tonnes: parseFloat(res.rows[0].cb_tonnes) };
+    try {
+      const res = await pool!.query('SELECT ship_id, year, cb_tonnes FROM ship_compliance WHERE ship_id=$1 AND year=$2', [shipId, year]);
+      if (res.rowCount === 0) return null;
+      return { ship_id: res.rows[0].ship_id, year: res.rows[0].year, cb_tonnes: parseFloat(res.rows[0].cb_tonnes) };
+    } catch (err: any) {
+      console.error('DB getCBRecord error, falling back to in-memory cb records:', err && err.message ? err.message : err);
+      const record = inMemoryCB.find(r => r.ship_id === shipId && r.year === year);
+      return record ?? null;
+    }
   },
 
   async getBankedAmount(shipId: string, year: number): Promise<number> {
@@ -108,8 +140,16 @@ export const repo: Repository = {
         .reduce((sum, e) => sum + e.amount_tonnes, 0);
       return total;
     }
-    const res = await pool!.query('SELECT COALESCE(SUM(amount_tonnes),0) as total FROM bank_entries WHERE ship_id=$1 AND year=$2', [shipId, year]);
-    return parseFloat(res.rows[0].total);
+    try {
+      const res = await pool!.query('SELECT COALESCE(SUM(amount_tonnes),0) as total FROM bank_entries WHERE ship_id=$1 AND year=$2', [shipId, year]);
+      return parseFloat(res.rows[0].total);
+    } catch (err: any) {
+      console.error('DB getBankedAmount error, falling back to in-memory bank entries:', err && err.message ? err.message : err);
+      const total = inMemoryBankEntries
+        .filter(e => e.ship_id === shipId && e.year === year)
+        .reduce((sum, e) => sum + e.amount_tonnes, 0);
+      return total;
+    }
   },
 
   async addBankEntry(shipId: string, year: number, amount: number): Promise<void> {
@@ -117,7 +157,12 @@ export const repo: Repository = {
       inMemoryBankEntries.push({ ship_id: shipId, year, amount_tonnes: amount });
       return;
     }
-    await pool!.query('INSERT INTO bank_entries (ship_id, year, amount_tonnes, created_at) VALUES ($1,$2,$3, now())', [shipId, year, amount]);
+    try {
+      await pool!.query('INSERT INTO bank_entries (ship_id, year, amount_tonnes, created_at) VALUES ($1,$2,$3, now())', [shipId, year, amount]);
+    } catch (err: any) {
+      console.error('DB addBankEntry error, recording in-memory instead:', err && err.message ? err.message : err);
+      inMemoryBankEntries.push({ ship_id: shipId, year, amount_tonnes: amount });
+    }
   },
 
   async applyBankEntry(shipId: string, year: number, amount: number): Promise<void> {
@@ -125,7 +170,12 @@ export const repo: Repository = {
       inMemoryBankEntries.push({ ship_id: shipId, year, amount_tonnes: -Math.abs(amount) });
       return;
     }
-    await pool!.query('INSERT INTO bank_entries (ship_id, year, amount_tonnes, created_at) VALUES ($1,$2,$3, now())', [shipId, year, -Math.abs(amount)]);
+    try {
+      await pool!.query('INSERT INTO bank_entries (ship_id, year, amount_tonnes, created_at) VALUES ($1,$2,$3, now())', [shipId, year, -Math.abs(amount)]);
+    } catch (err: any) {
+      console.error('DB applyBankEntry error, recording in-memory instead:', err && err.message ? err.message : err);
+      inMemoryBankEntries.push({ ship_id: shipId, year, amount_tonnes: -Math.abs(amount) });
+    }
   }
 };
 

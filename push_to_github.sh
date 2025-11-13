@@ -11,6 +11,102 @@ set -euo pipefail
 
 API_BASE="https://api.github.com"
 
+# Ensure required tools are available
+for cmd in git curl jq; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "Error: required command '$cmd' not found. Install it and retry."
+    exit 1
+  fi
+done
+
+# Ensure we're inside a git repo
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "No git repository detected in $(pwd). Initialize one? [y/N]"
+  read -r INIT_ANS
+  if [[ "$INIT_ANS" == "y" || "$INIT_ANS" == "Y" ]]; then
+    git init
+    echo "Initialized empty git repository."
+  else
+    echo "Aborting. Run this script from a git repository."
+    exit 1
+  fi
+fi
+
+# Create or update .gitignore to exclude node_modules and other common large artifacts
+GITIGNORE_FILE=".gitignore"
+GITIGNORE_ENTRIES=(
+  "node_modules/"
+  "dist/"
+  "build/"
+  "*.log"
+  ".DS_Store"
+)
+
+mkdir -p "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
+if [[ -f "$GITIGNORE_FILE" ]]; then
+  echo "Updating existing $GITIGNORE_FILE with recommended entries..."
+else
+  echo "Creating $GITIGNORE_FILE with recommended entries..."
+fi
+
+for entry in "${GITIGNORE_ENTRIES[@]}"; do
+  if ! grep -Fxq "$entry" "$GITIGNORE_FILE" 2>/dev/null; then
+    echo "$entry" >> "$GITIGNORE_FILE"
+  fi
+done
+
+# Detect large tracked files (>10MB) and offer to remove them from index
+SIZE_LIMIT_BYTES=$((10 * 1024 * 1024))
+echo "Scanning for tracked files larger than 10MB..."
+LARGE_FILES=$(git ls-files -z | xargs -0 -I{} bash -c 'if [ -f "{}" ]; then stat -c "%s %n" "{}"; fi' 2>/dev/null | awk -v lim=$SIZE_LIMIT_BYTES '$1 > lim {print substr($0, index($0,$2))}')
+
+if [[ -n "$LARGE_FILES" ]]; then
+  echo "The following tracked files are larger than 10MB:"
+  echo "$LARGE_FILES"
+  echo
+  read -r -p "Remove these files from the git index (they will remain on disk) and add patterns to .gitignore? [y/N] " REMOVE_ANS
+  if [[ "$REMOVE_ANS" == "y" || "$REMOVE_ANS" == "Y" ]]; then
+    # Remove each large file from index
+    while IFS= read -r f; do
+      # if file is inside node_modules, we already ignore the directory; otherwise add path to .gitignore
+      if [[ "$f" == node_modules/* ]]; then
+        git rm -r --cached node_modules || true
+      else
+        git rm --cached -- "$f" || true
+        # Add parent directory as a pattern to .gitignore where appropriate
+        parent=$(dirname "$f")
+        if ! grep -Fxq "$parent/" "$GITIGNORE_FILE" 2>/dev/null; then
+          echo "$parent/" >> "$GITIGNORE_FILE"
+        fi
+      fi
+    done <<< "$LARGE_FILES"
+    echo "Removed large files from index and updated $GITIGNORE_FILE."
+  else
+    echo "Left large files tracked. Pushing may fail or be slow."
+  fi
+else
+  echo "No tracked files over 10MB detected."
+fi
+
+# If node_modules is tracked, remove from index (safe no-op if not tracked)
+if git ls-files --error-unmatch node_modules >/dev/null 2>&1; then
+  echo "Removing tracked node_modules from index..."
+  git rm -r --cached node_modules || true
+fi
+
+# If there are unstaged changes from .gitignore edits, stage them
+if git status --porcelain | grep -q "^?? $GITIGNORE_FILE\|^[ AMD]"; then
+  git add "$GITIGNORE_FILE" || true
+fi
+
+# If the repository has no commits yet, make an initial commit so remote push will succeed
+if ! git rev-parse --verify HEAD >/dev/null 2>&1; then
+  echo "No commits detected. Creating an initial commit..."
+  # Add everything except ignored files
+  git add -A
+  git commit -m "chore: initial commit (add .gitignore and project files)" || true
+fi
+
 # If the first argument looks like a full GitHub HTTPS URL, use it directly and skip API creation.
 ARG1=${1:-}
 if [[ "$ARG1" == https://github.com/* ]]; then

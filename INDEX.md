@@ -21,6 +21,7 @@ A complete AI development workflow explanation and reflection
 The final system has been tested end-to-end and is ready for submission.
 
 2. Folder Structure
+
 fuel-eu-maritime/
 │
 ├── backend/                 
